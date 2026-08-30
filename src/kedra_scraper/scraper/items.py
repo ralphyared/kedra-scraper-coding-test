@@ -34,6 +34,11 @@ class StoredFile:
     content_hash: str = ""
     path: str = ""
 
+    # The server's ETag for this file, kept so the next run can ask
+    # "has this changed?" instead of downloading it again. Empty for HTML,
+    # which this site serves with no validators at all.
+    etag: str = ""
+
     # Set when a file was deliberately not fetched, so the gap is explained
     # rather than merely absent. Currently only "robots_disallowed".
     skipped_reason: str = ""
@@ -61,6 +66,13 @@ class DecisionItem:
     doc_type: str
     run_id: str
     scraper_version: str
+
+    # Normalised hash of the case page itself, distinct from the primary
+    # document's hash. On the next run this is what decides whether anything
+    # needs re-fetching: for a PDF-only record the primary hash describes the
+    # attachment, so comparing it would require downloading the attachment
+    # first -- which is the cost the check exists to avoid.
+    page_hash: str = ""
 
     files: list[StoredFile] = field(default_factory=list)
 

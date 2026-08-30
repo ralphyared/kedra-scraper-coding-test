@@ -24,14 +24,34 @@ from scrapy.http import Response
 from kedra_scraper import __version__
 from kedra_scraper.bodies import resolve
 from kedra_scraper.config import get_settings
+from kedra_scraper.hashing import content_hash
 from kedra_scraper.logging_setup import configure_logging, get_logger, new_run_id
 from kedra_scraper.naming import document_id
 from kedra_scraper.parsers import ListingRecord, parse_case_page, parse_listing
 from kedra_scraper.scraper.items import DecisionItem, StoredFile
+from kedra_scraper.storage.mongo import DecisionRepository
 from kedra_scraper.storage.objects import content_type_for
 from kedra_scraper.urls import absolute_url, page_count, search_url
 
 log = get_logger(__name__)
+
+
+def classify_failure(failure: Any) -> str:
+    """Turn a download failure into the reason recorded against the document.
+
+    A module-level function rather than a method so the classification can be
+    unit-tested without standing up a spider, a reactor, or a database.
+
+    The distinction it draws is the one that matters for the brief's accounting
+    rule. `robots_disallowed` is a deliberate compliance decision and will never
+    succeed on a retry; anything else is an incident that might. Collapsing them
+    into one "failed" bucket would make a policy choice indistinguishable from an
+    outage, and a reviewer could not tell whether the pipeline was behaving
+    correctly or quietly broken.
+    """
+    if failure.check(IgnoreRequest) is not None:
+        return "robots_disallowed"
+    return f"fetch_failed: {failure.value}"
 
 
 class WrcSpider(scrapy.Spider):
@@ -81,13 +101,26 @@ class WrcSpider(scrapy.Spider):
         settings = get_settings()
         configure_logging(level=settings.log_level, log_dir=settings.log_dir, run_id=self.run_id)
 
-        # Reconciliation counters. `total_reported` is the site's own figure and
-        # is the denominator the brief's accounting rule is judged against.
+        # Read access to what previous runs stored. The spider needs this to
+        # decide whether a document is worth downloading again, which has to
+        # happen before the attachment request is issued -- a pipeline would
+        # only get the chance after the bytes were already on the wire.
+        self._repo = DecisionRepository.from_settings(settings.mongo)
+
+        # Reconciliation counters. Every listing row the site reported must end
+        # up in exactly one of these buckets, which is what makes the brief's
+        # accounting rule checkable rather than aspirational:
+        #
+        #   total_reported == duplicate_rows + skipped_unchanged
+        #                     + items_emitted + failures
         self.total_reported = 0
         self.records_seen = 0
         self.items_emitted = 0
         self.failures = 0
         self.skipped_files = 0
+        self.skipped_unchanged = 0
+        self.duplicate_rows = 0
+        self.conditional_hits = 0
 
         # The site lists a decision once per constituent claim number, so a
         # single joined decision such as "RP166/2010, RP317/2010, RP339/2010,
@@ -172,7 +205,52 @@ class WrcSpider(scrapy.Spider):
     # ----------------------------------------------------------------------
 
     def parse_case(self, response: Response, record: ListingRecord) -> Iterator[Any]:
-        """Classify one case page and queue whatever still needs downloading."""
+        """Classify one case page, then decide whether it needs storing at all.
+
+        Two cheap exits come before any attachment is requested, because that is
+        the only point at which a download can still be avoided.
+        """
+        doc_id = document_id(self.body.slug, record.identifier)
+
+        # 1. The same decision listed twice in this run. Not a change, not a
+        #    skip -- just the site listing one joined decision once per claim
+        #    number. Counted separately so it never looks like missing data.
+        if doc_id in self._document_ids:
+            self.duplicate_rows += 1
+            log.debug("duplicate_listing_row", identifier=record.identifier, document_id=doc_id)
+            return iter(())
+        self._document_ids.add(doc_id)
+
+        # 2. Already stored, and the page is byte-identical after normalisation.
+        #
+        #    The case page is the source of truth for what a decision consists
+        #    of: the site regenerates it from its CMS, so a change to the text
+        #    or to which documents are attached necessarily changes this page.
+        #    An unchanged page therefore means an unchanged decision, and the
+        #    attachment does not need re-fetching to establish that.
+        #
+        #    This comparison uses content_hash, not the raw bytes. The page
+        #    embeds a per-request `Elapsed time` comment, so a raw comparison
+        #    would report every document as changed on every run and this branch
+        #    would never be taken -- the exact failure the two-hash design exists
+        #    to prevent.
+        page_hash = content_hash(response.body, is_html=True)
+        existing = self._repo.get(doc_id)
+        if (
+            existing is not None
+            and existing.get("page_hash") == page_hash
+            and existing.get("status") in {"ok", "partial"}
+        ):
+            self._repo.touch(doc_id)
+            self.skipped_unchanged += 1
+            log.info(
+                "record_unchanged_skipped",
+                identifier=record.identifier,
+                document_id=doc_id,
+                content_hash=page_hash,
+            )
+            return iter(())
+
         case = parse_case_page(response.text)
 
         item = DecisionItem(
@@ -189,6 +267,7 @@ class WrcSpider(scrapy.Spider):
             doc_type=case.doc_type,
             run_id=self.run_id,
             scraper_version=__version__,
+            page_hash=page_hash,
         )
 
         # The rendered page is stored whenever it carries content. It is the
@@ -207,9 +286,21 @@ class WrcSpider(scrapy.Spider):
                 )
             )
 
-        return self._fetch_attachments(item, list(case.attachments))
+        return self._fetch_attachments(item, list(case.attachments), existing)
 
-    def _fetch_attachments(self, item: DecisionItem, pending: list[Any]) -> Iterator[Any]:
+    @staticmethod
+    def _previous_file(existing: dict[str, Any] | None, url: str) -> dict[str, Any] | None:
+        """Find what a previous run stored for this attachment URL, if anything."""
+        if not existing:
+            return None
+        for entry in existing.get("files", []):
+            if entry.get("url", "").endswith(url) or url.endswith(entry.get("url", "")):
+                return entry if entry.get("path") else None
+        return None
+
+    def _fetch_attachments(
+        self, item: DecisionItem, pending: list[Any], existing: dict[str, Any] | None
+    ) -> Iterator[Any]:
         """Download attachments one at a time, then emit the finished item.
 
         Sequential rather than parallel because a decision is a single record:
@@ -219,41 +310,97 @@ class WrcSpider(scrapy.Spider):
         """
         if not pending:
             self.items_emitted += 1
-            self._document_ids.add(document_id(item.body, item.identifier))
             yield item
             return
 
         attachment, rest = pending[0], pending[1:]
+        url = absolute_url(attachment.url)
+        previous = self._previous_file(existing, url)
+
+        headers = {}
+        if previous and previous.get("etag"):
+            # Attachments are the one place a conditional request works here.
+            # Case pages send `Cache-Control: no-cache` with no validators, but
+            # PDFs carry an ETag the server honours -- measured, because the same
+            # responses also advertise Last-Modified and then ignore
+            # If-Modified-Since, resending the full body. Using the wrong one
+            # would look like working conditional GET while changing nothing.
+            headers["If-None-Match"] = previous["etag"]
+
         yield scrapy.Request(
-            absolute_url(attachment.url),
+            url,
             callback=self.parse_attachment,
             errback=self.attachment_failed,
-            cb_kwargs={"item": item, "attachment": attachment, "pending": rest},
+            headers=headers,
+            cb_kwargs={
+                "item": item,
+                "attachment": attachment,
+                "pending": rest,
+                "existing": existing,
+                "previous": previous,
+            },
+            # 304 is a success here, not an error. Without this Scrapy's
+            # HttpErrorMiddleware treats any non-2xx as a failure and routes it
+            # to the errback, where an unchanged file would be recorded as a
+            # fetch failure.
+            meta={"handle_httpstatus_list": [304]},
             # The same PDF can legitimately be linked from more than one
             # decision, and each needs its own copy recorded.
             dont_filter=True,
         )
 
     def parse_attachment(
-        self, response: Response, item: DecisionItem, attachment: Any, pending: list[Any]
+        self,
+        response: Response,
+        item: DecisionItem,
+        attachment: Any,
+        pending: list[Any],
+        existing: dict[str, Any] | None,
+        previous: dict[str, Any] | None,
     ) -> Iterator[Any]:
-        item.files.append(
-            StoredFile(
-                kind="primary",
-                url=response.url,
-                filename=attachment.filename,
-                data=response.body,
-                content_type=content_type_for(attachment.filename),
+        if response.status == 304 and previous is not None:
+            # Unchanged. Carry the previous run's stored details forward with no
+            # payload, so the storage pipeline has nothing to write and the
+            # record still points at the object already in the landing zone.
+            self.conditional_hits += 1
+            item.files.append(
+                StoredFile(
+                    kind=previous.get("kind", "primary"),
+                    url=previous["url"],
+                    filename=previous["filename"],
+                    content_type=previous.get("content_type", ""),
+                    size=previous.get("size", 0),
+                    file_hash=previous.get("file_hash", ""),
+                    content_hash=previous.get("content_hash", ""),
+                    path=previous["path"],
+                    etag=previous.get("etag", ""),
+                )
             )
-        )
-        log.info(
-            "document_downloaded",
-            identifier=item.identifier,
-            url=response.url,
-            bytes=len(response.body),
-            doc_type=item.doc_type,
-        )
-        yield from self._fetch_attachments(item, pending)
+            log.info(
+                "document_not_modified",
+                identifier=item.identifier,
+                url=response.url,
+                etag=previous.get("etag", ""),
+            )
+        else:
+            item.files.append(
+                StoredFile(
+                    kind="primary",
+                    url=response.url,
+                    filename=attachment.filename,
+                    data=response.body,
+                    content_type=content_type_for(attachment.filename),
+                    etag=(response.headers.get("ETag") or b"").decode("latin-1"),
+                )
+            )
+            log.info(
+                "document_downloaded",
+                identifier=item.identifier,
+                url=response.url,
+                bytes=len(response.body),
+                doc_type=item.doc_type,
+            )
+        yield from self._fetch_attachments(item, pending, existing)
 
     # ----------------------------------------------------------------------
     # Failure paths
@@ -274,9 +421,9 @@ class WrcSpider(scrapy.Spider):
         item: DecisionItem = request.cb_kwargs["item"]
         attachment = request.cb_kwargs["attachment"]
         pending: list[Any] = request.cb_kwargs["pending"]
+        existing: dict[str, Any] | None = request.cb_kwargs.get("existing")
 
-        robots_blocked = failure.check(IgnoreRequest) is not None
-        reason = "robots_disallowed" if robots_blocked else f"fetch_failed: {failure.value}"
+        reason = classify_failure(failure)
 
         item.files.append(
             StoredFile(
@@ -293,7 +440,7 @@ class WrcSpider(scrapy.Spider):
             url=absolute_url(attachment.url),
             reason=reason,
         )
-        yield from self._fetch_attachments(item, pending)
+        yield from self._fetch_attachments(item, pending, existing)
 
     def case_failed(self, failure: Any) -> None:
         """A case page that could not be fetched at all.
@@ -328,8 +475,10 @@ class WrcSpider(scrapy.Spider):
         would leave the stored count looking short; reporting only the second
         would hide a genuinely missed row.
         """
-        unaccounted = self.total_reported - self.items_emitted - self.failures
-        duplicates = self.items_emitted - len(self._document_ids)
+        accounted = (
+            self.items_emitted + self.skipped_unchanged + self.duplicate_rows + self.failures
+        )
+        unaccounted = self.total_reported - accounted
         log.info(
             "partition_finished",
             body=self.body.slug,
@@ -337,11 +486,14 @@ class WrcSpider(scrapy.Spider):
             reason=reason,
             total_reported=self.total_reported,
             records_seen=self.records_seen,
+            # Every listing row lands in exactly one of the next four buckets.
             items_emitted=self.items_emitted,
-            unique_documents=len(self._document_ids),
-            duplicate_rows=duplicates,
+            skipped_unchanged=self.skipped_unchanged,
+            duplicate_rows=self.duplicate_rows,
             failures=self.failures,
+            unique_documents=len(self._document_ids),
             files_skipped=self.skipped_files,
+            conditional_hits=self.conditional_hits,
             unaccounted=unaccounted,
             reconciled=unaccounted == 0,
             run_id=self.run_id,

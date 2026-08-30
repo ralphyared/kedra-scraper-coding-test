@@ -53,13 +53,35 @@ def document_id(body_slug: str, identifier: str) -> str:
     return f"{body_slug}:{slugify(identifier)}"
 
 
-def landing_key(body_slug: str, partition: str, identifier: str, filename: str) -> str:
+def versioned_filename(filename: str, version: str) -> str:
+    """Insert a version marker before the extension: `a.pdf` -> `a__abc123.pdf`.
+
+    Before the extension rather than after, so the file still reads as a PDF to
+    anything that dispatches on extension -- including a reviewer browsing the
+    MinIO console.
+    """
+    stem, dot, extension = filename.rpartition(".")
+    if not dot:
+        return f"{filename}__{version}"
+    return f"{stem}__{version}.{extension}"
+
+
+def landing_key(
+    body_slug: str, partition: str, identifier: str, filename: str, version: str = ""
+) -> str:
     """Object key in the landing bucket.
 
     The original filename is preserved: the brief requires landing-zone data to
     be stored as served, and the name the site chose is part of that.
+
+    `version` exists because the landing zone is append-only. The brief forbids
+    deleting or updating stored data, so when a decision is re-published with
+    different content the new bytes go to a new key rather than over the old
+    ones. The first copy keeps the clean name; only subsequent versions carry a
+    marker, so the common case stays readable and history is still preserved.
     """
-    return f"body={body_slug}/partition={partition}/{slugify(identifier)}/{filename}"
+    name = versioned_filename(filename, version) if version else filename
+    return f"body={body_slug}/partition={partition}/{slugify(identifier)}/{name}"
 
 
 def curated_key(body_slug: str, partition: str, identifier: str, extension: str) -> str:
