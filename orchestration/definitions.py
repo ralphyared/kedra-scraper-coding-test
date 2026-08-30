@@ -12,9 +12,9 @@ from __future__ import annotations
 
 from dagster import Definitions
 
-from .assets import every_row_is_accounted_for, landing_documents
+from .assets import curated_documents, every_row_is_accounted_for, landing_documents
 
 defs = Definitions(
-    assets=[landing_documents],
+    assets=[landing_documents, curated_documents],
     asset_checks=[every_row_is_accounted_for],
 )
