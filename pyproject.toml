@@ -103,7 +103,11 @@ python_version = "3.12"
 # `orchestration/` is added here in Phase 5, when the Dagster assets land.
 # Pointing mypy at a directory that does not exist yet makes it fail on a
 # fresh clone, which is a bad first impression for a reviewer.
-files = ["src"]
+files = ["src", "tests"]
+# tests/ is not a package (no __init__.py, so pytest keeps test module names
+# unqualified). mypy needs the directory on its search path to resolve the
+# `from conftest import ...` that pytest satisfies via rootdir injection.
+mypy_path = "tests"
 strict = true
 warn_unreachable = true
 # Show the error code so a `# type: ignore[...]` is always specific, never blanket.

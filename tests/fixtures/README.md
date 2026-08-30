@@ -11,6 +11,7 @@ All parser unit tests run against these offline — no network in the test suite
 | `case_labour_court_inline.html` | Labour Court case page, 2024 | Document shape 1 on a second body. |
 | `case_eat_pdf_only.html` | EAT import, 2010 | Document shape 2 — empty `div.content` + `div.related-items a.download` → PDF. |
 | `case_equality_tribunal_html_plus_pdf.html` | Equality Tribunal, 2000 | Document shape 3 — HTML abstract *and* a source PDF link inside `div.content`. |
+| `listing_zero_results.html` | A search with no matches | `div.item-list` is present but **empty**, with no `searchhead` count and no pager. This is what distinguishes "the search legitimately found nothing" from "the fetch failed" -- a failed request has no `item-list` at all. Treating the two alike would let a silently broken partition report zero records as success. |
 | `search_form_excerpt.html` | `/en/search/` with no query | **Excerpt, not a full capture.** The form region of the baseline ASP.NET page: `__VIEWSTATE` present (value truncated) to document why the GET querystring route makes viewstate handling unnecessary, plus the body checkboxes that are the authoritative source of the body IDs (EAT=2, Equality Tribunal=1, Labour Court=3, WRC=15376). Trimmed 800 KB → 14 KB; the viewstate value alone was 372 KB. |
 | `response_headers.txt` | Case-page response | `Cache-Control: no-cache`, no `ETag`/`Last-Modified` → conditional GET unusable for HTML (it *is* usable for PDFs). |
 
