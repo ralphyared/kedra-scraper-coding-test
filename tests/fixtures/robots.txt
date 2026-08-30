@@ -1,0 +1,27 @@
+User-agent: *
+
+Disallow: /Cases/
+Disallow: /EAT_Import/
+Disallow: /Equality_Tribunal_Import/
+Disallow: /Labour_Court_Import/
+Disallow: /en/Cases/
+Disallow: /en/EAT_Import/
+Disallow: /en/Equality_Tribunal_Import/
+Disallow: /en/Labour_Court_Import/
+Disallow: /en/New_Draft_Site/
+Disallow: /New_Draft_Site/
+Disallow: /en/Publications_Forms/Employment_Appeals_Tribunal_Diary/
+Disallow: /Publications_Forms/Employment_Appeals_Tribunal_Diary/
+Disallow: /en/Publications_Forms/Employment_Appeals_Tribunal_Diary/Archived/
+Disallow: /Publications_Forms/Employment_Appeals_Tribunal_Diary/Archived/
+Disallow: /en/Training/
+Disallow: /Training/
+Disallow: /en/New_Draft_Site/
+Disallow: /New_Draft_Site/
+Disallow: /en/registered_employment_agreements/
+Disallow: /en/about_the_reform_programme/
+Disallow: /en/archive/
+Disallow: /en/wr_bodies/
+Disallow: /en/test/
+Disallow: /ga/Cases/
+Disallow: /ga/Casanna/
