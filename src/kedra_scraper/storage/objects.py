@@ -74,8 +74,33 @@ class ObjectStore:
             raise
         return True
 
+    def stored_content_hash(self, bucket: str, key: str) -> str | None:
+        """The content hash recorded on an existing object, or None if absent.
+
+        Written as S3 user metadata at upload time so this is a HEAD rather than
+        a download. Comparing hashes is what lets a re-run distinguish "the same
+        document is already here" from "a different version is already here" --
+        the first is a no-op, the second must be written to a new key because the
+        landing zone is append-only.
+        """
+        try:
+            response = self._client.head_object(Bucket=bucket, Key=key)
+        except ClientError as exc:
+            if exc.response["Error"]["Code"] in {"404", "NoSuchKey", "NotFound"}:
+                return None
+            raise
+        # S3 lowercases user metadata keys; boto3 returns them already stripped
+        # of the `x-amz-meta-` prefix.
+        return response.get("Metadata", {}).get("content-hash")
+
     def put_if_absent(
-        self, bucket: str, key: str, data: bytes, *, content_type: str | None = None
+        self,
+        bucket: str,
+        key: str,
+        data: bytes,
+        *,
+        content_type: str | None = None,
+        content_hash: str = "",
     ) -> bool:
         """Write `data` unless `key` already exists. Returns True if written.
 
@@ -84,9 +109,9 @@ class ObjectStore:
 
         This is check-then-write, so it is not atomic: two concurrent crawls of
         the same partition could both see the key as absent and both upload.
-        That is acceptable here because the key embeds the content hash, so the
-        two writes are byte-identical and the loser costs only bandwidth. It
-        would not be acceptable for mutable keys.
+        That is acceptable here because a given key only ever holds one version's
+        bytes, so the two writes are byte-identical and the loser costs only
+        bandwidth. It would not be acceptable for mutable keys.
         """
         if self.exists(bucket, key):
             return False
@@ -95,6 +120,7 @@ class ObjectStore:
             Key=key,
             Body=data,
             ContentType=content_type or _DEFAULT_CONTENT_TYPE,
+            Metadata={"content-hash": content_hash} if content_hash else {},
         )
         return True
 
