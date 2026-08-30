@@ -182,6 +182,13 @@ def _transform_one(
                 else None
             ),
             "adjudicator": extracted.adjudicator,
+            # The Labour Court sits as a division of three rather than
+            # appointing a single officer. Stored separately rather than
+            # flattened into `adjudicator`, because they are different things;
+            # `decided_by` on the Enrichment unifies them for consumers that do
+            # not care which body issued the decision.
+            "division": list(extracted.division),
+            "decided_by": list(extracted.decided_by),
             "legislation": extracted.legislation,
             "internal_reference": extracted.internal_reference,
             "complaint_references": list(extracted.complaint_references),
