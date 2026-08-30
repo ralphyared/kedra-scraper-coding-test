@@ -1,0 +1,207 @@
+<!--
+  EXCERPT - not a full page capture.
+
+  Source: GET https://www.workplacerelations.ie/en/search/  (no query string)
+  Kept only as evidence for two claims in ARCHITECTURE.md:
+
+    1. The search page is ASP.NET WebForms and carries a __VIEWSTATE, which is why
+       "do we need to replay viewstate?" is a reasonable question to ask. The answer
+       is no: the POST 302s to a plain GET querystring that works standalone, so the
+       spider never touches this form. See listing_wrc_2024-01_page1.html.
+    2. The body checkbox values below are the authoritative source for the body IDs
+       used throughout the project: EAT=2, Equality Tribunal=1, Labour Court=3,
+       WRC=15376.
+
+  Trimmed from the original 800 KB capture: the __VIEWSTATE value alone was 372 KB.
+  Hidden ASP.NET field values are truncated; everything else is verbatim.
+  Regenerate the full page with:
+    curl -s https://www.workplacerelations.ie/en/search/ -o search_form_empty.html
+-->
+        <form method="post" action="/en/search/" id="form" class="container">
+<div class="aspNetHidden">
+<input type="hidden" name="__EVENTTARGET" id="__EVENTTARGET" value="" />
+<input type="hidden" name="__EVENTARGUMENT" id="__EVENTARGUMENT" value="" />
+<input type="hidden" name="__LASTFOCUS" id="__LASTFOCUS" value="" />
+<input type="hidden" name="__VIEWSTATE" id="__VIEWSTATE" value="/wEPDwUJLTc3NjA3NjE1D2QWAmYPZBYCAgMPFgYeB2RhdGEtbmkFAjM3HgdkYXRhLW50BQExHg5kYXRh ...[372068 chars truncated]" />
+</div>
+
+<script type="text/javascript">
+//<![CDATA[
+var theForm = document.forms['form'];
+if (!theForm) {
+    theForm = document.form;
+}
+function __doPostBack(eventTarget, eventArgument) {
+    if (!theForm.onsubmit || (theForm.onsubmit() != false)) {
+        theForm.__EVENTTARGET.value = eventTarget;
+        theForm.__EVENTARGUMENT.value = eventArgument;
+        theForm.submit();
+    }
+}
+//]]>
+</script>
+
+
+
+<script src="/ScriptResource.axd?d=thKTJHreUa2tUdQns-MLZZCRM1OqZ-14-Bfd8IPUGZMiJipf9_ymVungYx8mBLm7-E10w4iiwRkYA-0eJnCiq2EpAch5WiH6E4Y5ijhlbv--V0iyVwclgyY2xRGaMHWXw5BoyC-YBeZlL10V_sPO_3CXG3GlSDcPega8dod7ghQ1&amp;t=fffffffff7f39b88" type="text/javascript"></script>
+<div class="aspNetHidden">
+
+	<input type="hidden" name="__VIEWSTATEGENERATOR" id="__VIEWSTATEGENERATOR" value="BBBC20B8" />
+</div>
+
+            
+            
+            <div id="searchPnl">
+                
+                <div id="searchResult">
+                    <div class="row">
+                        <div id="advancedSearchControls" class="no-print col-lg-3">
+                            <div class="row">
+                                <div class="col-sm-12">
+                                    <p>&#160;</p>
+                                </div>
+                            </div>
+                            <h3>Advanced Search Filters</h3>
+                            <hr />
+                            <div id="advanceSearch_panel" class="advanceSearch">
+                                <div id="advanceSearchDD" class="shell">
+                                    <div class="cols" onkeypress="javascript:return WebForm_FireDefaultButton(event, &#39;refine_btn&#39;)">
+	
+                                        <!--Case & Decision Number-->
+                                        <div class="row margin-top">
+                                            <div class="col-sm-12">
+                                                <i class="fa fa-angle-down showhide" onclick="togleShow(this)"></i>
+                                                <label for="TextBox5" id="Label7">Decision Number</label><i class="float-right fa fa-info circle tool-tip" 
+                                                    title="Formats vary within the bodies, here are examples for each body:
+                                                    WRC: ADJ-00001234,
+                                                    Labour Court: LCR20458, AD135,
+                                                    Equality Tribunal: DEC-E2008-066,
+                                                    Employment Appeals Tribunal: 47955, 31828."
+                                                    ></i>
+                                                <input name="ctl00$ContentPlaceHolder_Main$TextBox5" type="text" id="TextBox5" class="form-control form-control-input" style="display:none" />
+                                            </div>
+                                        </div>
+                                        <div class="row margin-top">
+                                            <div class="col-sm-12">
+                                                <i class="fa fa-angle-down showhide" onclick="togleShow(this)"></i>
+                                                <label for="TextBox4" id="Label6">Case Number</label><i class="float-right fa fa-info circle tool-tip" 
+                                                    title="Formats vary within the bodies, here are examples for each body:
+                                                    WRC: ADJ-00001234,
+                                                    Labour Court: CD/12/572, CD/10/739,
+                                                    Equality Tribunal: EE/2006/040, ES/2005/0944,
+                                                    Employment Appeals Tribunal: RP1388/2011, MN510/2011."
+                                                    ></i>
+                                                <input name="ctl00$ContentPlaceHolder_Main$TextBox4" type="text" id="TextBox4" class="form-control form-control-input" style="display:none" />
+                                            </div>
+                                        </div>
+
+                                        <!--Legislation and Sub-->
+                                        <div id="LegUP">
+		
+                                                <div class="row margin-top">
+                                                    <div class="col-sm-12">
+                                                        <i id="legislationOpen" class="fa fa-angle-down showhide" onclick="togleShow(this)"></i>
+                                                        <span id="Label9" class="labelSelect">Legislation</span><i class="float-right fa fa-info circle tool-tip" title="Refine search by legislation. Please use Keyword Search if you don't have the exact details or if the expected decision is not returned."></i>
+                                                        <div id="legislationOptions" class="selectBox" style="display:none">
+                                                            <select name="ctl00$ContentPlaceHolder_Main$DD2" onchange="javascript:setTimeout(&#39;__doPostBack(\&#39;ctl00$ContentPlaceHolder_Main$DD2\&#39;,\&#39;\&#39;)&#39;, 0)" id="DD2" class="form-control">
+			<option selected="selected" value="-1">Please Select</option>
+			<option value="2">Adoptive Leave Act, 1995</option>
+			<option value="24">Anti-Discrimination (Pay) Act, 1974</option>
+			<option value="16862">Appeal of Compliance Notice</option>
+			<option value="1">Carer&#39;s Leave Act, 2001</option>
+			<option value="16864">Charities Act 2009</option>
+			<option value="17090">Consumer Protection Acts, 2007 and 2014</option>
+			<option value="586">Criminal Justice Act, 2011</option>
+			<option value="14613">EC (Road Transport) (Organisation of Working Time of Persons Performing Mobile Road Transport Activities) Regulations 2012</option>
+			<option value="10">Employee (Provision of Information and Consultation) Act, 2006</option>
+			<option value="23">Employment Equality Acts</option>
+			<option value="20">Employment Permits Acts</option>
+			<option value="27">Equal Status Acts</option>
+			<option value="583">European Communities (European Public Limited-liability Company)(Employee Involvement) Regulations, 2006</option>
+			<option value="585">European Communities (Occurrence Reporting in Civil Aviation) Regulations, 2007</option>
+			<option value="21">European Communities (Protection of Employees on Transfer of Undertakings) Regulations 2003</option>
+			<option value="14201">European Communities (Protection of Employment) Regulations, 2000</option>
+			<option value="584">European Communities (Working Conditions of Mobile Workers engaged in interoperable Cross-Border Services in the Railway Sector) Regulations, 2009</option>
+			<option value="19306">Further Education and Training Act 2013</option>
+			<option value="19629">Health Act 2007</option>
+			<option value="587">Health Act, 2004</option>
+			<option value="17094">Industrial Relations (Amendment) Act, 2015</option>
+			<option value="30">Industrial Relations (Miscellaneous Provisions) Act 2004</option>
+			<option value="28">Industrial Relations Act, 1990</option>
+			<option value="29">Industrial Relations Act, 2001</option>
+			<option value="26">Industrial Relations Acts 1946 &amp; 1969</option>
+			<option value="4">Maternity Protection Act, 1994</option>
+			<option value="5">Minimum Notice and Terms of Employment Acts</option>
+			<option value="7">National Minimum Wage Act, 2000</option>
+			<option value="8">Organisation of Working Time Act, 1997</option>
+			<option value="3">Parental Leave Act, 1998</option>
+			<option value="16075">Paternity Leave and Benefit Act 2016</option>
+			<option value="9">Payment of Wages Act, 1991</option>
+			<option value="25">Pensions Acts</option>
+			<option value="17224">Prevention of Corruption (Amendment) Act, 2001</option>
+			<option value="17299">Prevention of Corruption (Amendment) Act, 2010</option>
+			<option value="15409">Protected Disclosures Act, 2014</option>
+			<option value="11">Protection of Employees (Employers&#39; Insolvency) Act, 1984</option>
+			<option value="12">Protection of Employees (Fixed-Term Work) Act, 2003</option>
+			<option value="14">Protection of Employees (Part-Time Work) Act, 2001</option>
+			<option value="13">Protection of Employees (Temporary Agency Work) Act, 2012</option>
+			<option value="601">Protection of Employment (Exceptional Collective Redundancies and Related Matters) Act, 2007</option>
+			<option value="15">Protection of Employment Act, 1977</option>
+			<option value="16724">Protection of Persons Reporting Child Abuse Act 1998</option>
+			<option value="16">Protection of Young Persons (Employment) Act, 1996</option>
+			<option value="17">Redundancy Payment Acts</option>
+			<option value="31">Safety, Health and Welfare at Work Act 2005</option>
+			<option value="17112">Section 20 of (European Cooperate Society)(Employee Involvement) Regulations 2007</option>
+			<option value="19627">Sick Leave Act 2022</option>
+			<option value="6">Terms of Employment (Information) Acts</option>
+			<option value="19">Transnational Information and Consultation of Employees Act, 1996</option>
+			<option value="18">Unfair Dismissals Acts</option>
+			<option value="19628">Work life Balance and Miscellaneous Provisions Act 2023</option>
+			<option value="16074">Workplace Relations Act 2015</option>
+
+		</select>
+                                                        </div>
+                                                    </div>
+                                                </div>
+                                                <div class="row margin-top d-none">
+                                                    <div class="col-sm-12">
+                                                        <i id="legislationSubOpen" class="fa fa-angle-down showhide" onclick="togleShow(this)"></i>
+                                                        <span id="Label10" class="aspNetDisabled labelSelect">Legislation Sub-section</span><i class="float-right fa fa-info circle tool-tip" title="In certain circumstances it may be possible to select a Section of legislation to refine the search. You must first select the Legislation in the previous field."></i>
+                                                        <div id="legislationSubOptions" class="selectBox" style="display:none">
+                                                            <select name="ctl00$ContentPlaceHolder_Main$DD3" id="DD3" class="form-control">
+			<option selected="selected" value="-1">Please Select</option>
+
+		</select>
+                                                            <input type="hidden" name="ctl00$ContentPlaceHolder_Main$DD3_Value" id="DD3_Value" />
+                                                        </div>
+                                                    </div>
+                                                </div>
+                                            
+	</div>
+                                        <div class="row margin-top">
+
+                                            <div class="col-sm-12">
+                                                <!--Bodies-->
+                                                <i class="fa fa-angle-down showhide" onclick="togleShow(this)"></i>
+                                                <label for="CB2" id="Label2">Body</label><i class="float-right fa fa-info circle tool-tip" title="Refine the search by body."></i>
+                                                <div class="form-control-holder" style="display:none">
+                                                    <table id="CB2">
+		<tr>
+			<td><input id="CB2_0" type="checkbox" name="ctl00$ContentPlaceHolder_Main$CB2$CB2_0" value="2" /><label for="CB2_0">Employment Appeals Tribunal</label></td>
+		</tr><tr>
+			<td><input id="CB2_1" type="checkbox" name="ctl00$ContentPlaceHolder_Main$CB2$CB2_1" value="1" /><label for="CB2_1">Equality Tribunal</label></td>
+		</tr><tr>
+			<td><input id="CB2_2" type="checkbox" name="ctl00$ContentPlaceHolder_Main$CB2$CB2_2" value="3" /><label for="CB2_2">Labour Court</label></td>
+		</tr><tr>
+			<td><input id="CB2_3" type="checkbox" name="ctl00$ContentPlaceHolder_Main$CB2$CB2_3" value="15376" /><label for="CB2_3">Workplace Relations Commission</label></td>
+		</tr>
+	</table>
+                                                </div>
+                                            </div>
+                                        </div>
+
+
+                                        <div class="row margin-top">
+                                            <div class="col-sm-12">
+                                                <!--Topic and Sub Topic-->
+</form>

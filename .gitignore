@@ -1,0 +1,24 @@
+# --- private working material -------------------------------------------------
+# docs/ holds the implementation plan and the text of the coding-test brief.
+# Both are working notes, not part of the deliverable. The graded documents
+# (README.md, ARCHITECTURE.md) live at the repo root instead.
+#
+# Listed as docs/* rather than docs/ so that a specific subdirectory can be
+# un-ignored later (e.g. `!docs/screenshots/` for README images) without
+# rewriting this rule -- git will not descend into an ignored *directory*.
+docs/*
+
+# --- python -------------------------------------------------------------------
+__pycache__/
+*.py[cod]
+.venv/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+*.egg-info/
+
+# --- project runtime ----------------------------------------------------------
+.env
+logs/
+.scrapy/                  # Scrapy HTTPCACHE
+data/

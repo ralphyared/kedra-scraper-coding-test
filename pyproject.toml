@@ -1,0 +1,123 @@
+[project]
+name = "kedra-scraper"
+version = "0.1.0"
+description = "Scrapy pipeline for Workplace Relations Commission decisions, partitioned by body and date range."
+readme = "README.md"
+
+# Upper bound is deliberate. Dagster and Scrapy both carry compiled dependencies
+# (Twisted, lxml, cryptography, pydantic-core) whose wheel availability lags new
+# CPython releases by months. Pinning the language level to 3.12 means the lock
+# file resolves to prebuilt wheels on every platform rather than trying to
+# compile from source on a reviewer's machine.
+requires-python = ">=3.12,<3.13"
+
+dependencies = [
+    # --- scraping ---------------------------------------------------------
+    # Required by the brief. The floor is just a lower bound for a maintained
+    # release; uv.lock pins the exact version this was built and tested against.
+    "scrapy>=2.11",
+
+    # --- storage ----------------------------------------------------------
+    # The brief's transformation step says "fetch metadata from mongo", so the
+    # NoSQL choice is effectively made for us.
+    "pymongo>=4.6",
+    # boto3 rather than minio-py: the same code then runs unchanged against real
+    # S3, which is the point of using MinIO as a stand-in at all.
+    "boto3>=1.34",
+
+    # --- config & logging -------------------------------------------------
+    # Single source of configuration, validated at startup. The brief's
+    # Configuration requirement says no hardcoded values.
+    "pydantic-settings>=2.2",
+    # Requirement 10 asks for structured logs; structlog emits JSON lines
+    # natively without hand-rolling a logging.Formatter.
+    "structlog>=24.1",
+
+    # --- transformation ---------------------------------------------------
+    "beautifulsoup4>=4.12",
+    # Named explicitly even though Scrapy already requires it: bs4 picks its
+    # parser backend at runtime, and an implicit dependency that changes
+    # parsing behaviour should not be invisible in the manifest.
+    "lxml>=5.1",
+
+    # --- cli --------------------------------------------------------------
+    "typer>=0.12",
+
+    # --- orchestration ----------------------------------------------------
+    # The brief says the orchestrator "carries significant weight".
+    # dagster-webserver is what serves `dagster dev`; the core package alone
+    # gives no UI, and the partition grid is part of the deliverable.
+    "dagster>=1.7",
+    "dagster-webserver>=1.7",
+]
+
+[project.scripts]
+kedra = "kedra_scraper.cli:app"
+
+# PEP 735 dependency group. Unlike [project.optional-dependencies] these are
+# never published as extras and are installed by `uv sync` by default, which is
+# exactly the semantics wanted for tooling.
+[dependency-groups]
+dev = [
+    "pytest>=8.1",
+    "pytest-cov>=5.0",
+    "ruff>=0.4",
+    "mypy>=1.9",
+    # Without these two, mypy sees boto3 and bs4 as `Any` and strict mode
+    # silently stops checking every call into them.
+    "boto3-stubs[s3]>=1.34",
+    "types-beautifulsoup4>=4.12",
+]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/kedra_scraper"]
+
+# ---------------------------------------------------------------------------
+# ruff: lint + format, replacing flake8 + isort + black in one binary.
+# ---------------------------------------------------------------------------
+[tool.ruff]
+line-length = 100
+target-version = "py312"
+src = ["src", "tests", "orchestration"]
+
+[tool.ruff.lint]
+select = [
+    "E", "W",  # pycodestyle
+    "F",       # pyflakes
+    "I",       # import sorting
+    "UP",      # pyupgrade: keep syntax current with the pinned 3.12
+    "B",       # bugbear: mutable default args, loop-variable capture
+    "SIM",     # simplify
+    "RUF",     # ruff's own rules
+]
+
+# ---------------------------------------------------------------------------
+# mypy: strict over our own code only.
+# ---------------------------------------------------------------------------
+[tool.mypy]
+python_version = "3.12"
+# `orchestration/` is added here in Phase 5, when the Dagster assets land.
+# Pointing mypy at a directory that does not exist yet makes it fail on a
+# fresh clone, which is a bad first impression for a reviewer.
+files = ["src"]
+strict = true
+warn_unreachable = true
+# Show the error code so a `# type: ignore[...]` is always specific, never blanket.
+show_error_codes = true
+
+# Scrapy ships partial annotations and no py.typed marker, so mypy cannot see
+# into it. Scoped to these modules rather than set globally, so a typo in any
+# other import is still an error.
+[[tool.mypy.overrides]]
+module = ["scrapy.*", "itemadapter.*", "twisted.*"]
+ignore_missing_imports = true
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+# --strict-markers turns a typo'd @pytest.mark into an error instead of a
+# silently-ignored no-op.
+addopts = "-q --strict-markers"

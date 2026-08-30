@@ -1,0 +1,12 @@
+# Normalise line endings for source files so a reviewer on Linux or macOS gets
+# LF regardless of the platform this was committed from. Makefile recipes are
+# the sharp edge here: a trailing CR turns each recipe line into a command that
+# a POSIX shell cannot find.
+* text=auto eol=lf
+
+# The captured fixtures are exempt, and this is not a stylistic choice. They
+# must stay byte-for-byte identical to what the site served, because the
+# hashing tests assert on their exact bytes -- `case_wrc_inline.html` and its
+# refetch differ by precisely one line, and any line-ending normalisation would
+# rewrite every line and destroy that property.
+tests/fixtures/** -text
