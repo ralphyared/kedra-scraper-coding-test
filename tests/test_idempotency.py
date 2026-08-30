@@ -15,7 +15,7 @@ from datetime import date
 from kedra_scraper.naming import landing_key, versioned_filename
 from kedra_scraper.scraper.items import DecisionItem, StoredFile
 from kedra_scraper.scraper.pipelines import ObjectStoragePipeline
-from kedra_scraper.scraper.spiders.wrc import classify_failure
+from kedra_scraper.scraper.spiders.wrc import classify_failure, failure_status
 
 
 class FakeStore:
@@ -188,3 +188,37 @@ def test_a_timeout_is_reported_with_its_cause_too() -> None:
     """A miss with no stated reason is indistinguishable from data that never
     existed, which is precisely what the brief's accounting rule forbids."""
     assert "TimeoutError" in classify_failure(FakeFailure(False, "TimeoutError: 60s"))
+
+
+# --------------------------------------------------------------------------
+# Requirement 10: failed downloads are logged with their URL and error code
+# --------------------------------------------------------------------------
+
+
+class FakeResponse:
+    def __init__(self, status: int) -> None:
+        self.status = status
+
+
+class FakeHttpError:
+    def __init__(self, status: int) -> None:
+        self.response = FakeResponse(status)
+
+
+def test_an_http_failure_reports_its_status_code() -> None:
+    """The brief asks for error *codes*, not just error text.
+
+    The exception's string usually contains the status as prose, which cannot
+    be filtered, counted or alerted on. Surfacing it as an integer is what makes
+    "how many 404s did this run see?" a query rather than a grep.
+    """
+    failure = FakeFailure(False, "404 Not Found")
+    failure.value = FakeHttpError(404)  # type: ignore[assignment]
+    assert failure_status(failure) == 404
+
+
+def test_a_failure_that_never_got_a_response_has_no_status() -> None:
+    """DNS failures, connection timeouts and robots refusals never reach a
+    response, so None is the honest answer rather than a fabricated 0."""
+    assert failure_status(FakeFailure(True, "ignored by robots")) is None
+    assert failure_status(FakeFailure(False, "TimeoutError")) is None
