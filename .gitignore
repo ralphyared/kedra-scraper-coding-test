@@ -21,4 +21,9 @@ __pycache__/
 .env
 logs/
 .scrapy/                  # Scrapy HTTPCACHE
+
+# Dagster's local run/event storage. Generated state, not source: it holds
+# materialisation history for this machine only.
+.dagster/
+.tmp_dagster_home_*
 data/

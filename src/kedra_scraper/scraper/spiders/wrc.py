@@ -12,8 +12,10 @@ lives in the pipelines.
 
 from __future__ import annotations
 
+import json
 from collections.abc import Iterator
 from datetime import date
+from pathlib import Path
 from typing import Any, ClassVar
 from urllib.parse import urlsplit
 
@@ -72,6 +74,7 @@ class WrcSpider(scrapy.Spider):
         end: str = "",
         partition: str = "",
         run_id: str = "",
+        stats_file: str = "",
         **kwargs: Any,
     ) -> None:
         super().__init__(**kwargs)
@@ -91,6 +94,7 @@ class WrcSpider(scrapy.Spider):
             partition or f"{self.start_date.year:04d}-{self.start_date.month:02d}"
         )
         self.run_id = run_id or new_run_id()
+        self.stats_file = stats_file
 
         # Installed here, not at import time. Scrapy configures the root logger
         # while starting the crawler, which happens before the spider is
@@ -479,22 +483,31 @@ class WrcSpider(scrapy.Spider):
             self.items_emitted + self.skipped_unchanged + self.duplicate_rows + self.failures
         )
         unaccounted = self.total_reported - accounted
-        log.info(
-            "partition_finished",
-            body=self.body.slug,
-            partition_date=self.partition_label,
-            reason=reason,
-            total_reported=self.total_reported,
-            records_seen=self.records_seen,
+        summary = {
+            "body": self.body.slug,
+            "partition_date": self.partition_label,
+            "reason": reason,
+            "total_reported": self.total_reported,
+            "records_seen": self.records_seen,
             # Every listing row lands in exactly one of the next four buckets.
-            items_emitted=self.items_emitted,
-            skipped_unchanged=self.skipped_unchanged,
-            duplicate_rows=self.duplicate_rows,
-            failures=self.failures,
-            unique_documents=len(self._document_ids),
-            files_skipped=self.skipped_files,
-            conditional_hits=self.conditional_hits,
-            unaccounted=unaccounted,
-            reconciled=unaccounted == 0,
-            run_id=self.run_id,
-        )
+            "items_emitted": self.items_emitted,
+            "skipped_unchanged": self.skipped_unchanged,
+            "duplicate_rows": self.duplicate_rows,
+            "failures": self.failures,
+            "unique_documents": len(self._document_ids),
+            "files_skipped": self.skipped_files,
+            "conditional_hits": self.conditional_hits,
+            "unaccounted": unaccounted,
+            "reconciled": unaccounted == 0,
+            "run_id": self.run_id,
+        }
+        log.info("partition_finished", **summary)
+
+        # Written for the orchestrator, which runs this spider as a subprocess
+        # and needs its results as data. Scraping them back out of stdout would
+        # couple Dagster to the log format and break the moment a library wrote
+        # something unexpected to the same stream.
+        if self.stats_file:
+            path = Path(self.stats_file)
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_text(json.dumps(summary, indent=2), encoding="utf-8")

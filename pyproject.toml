@@ -100,10 +100,7 @@ select = [
 # ---------------------------------------------------------------------------
 [tool.mypy]
 python_version = "3.12"
-# `orchestration/` is added here in Phase 5, when the Dagster assets land.
-# Pointing mypy at a directory that does not exist yet makes it fail on a
-# fresh clone, which is a bad first impression for a reviewer.
-files = ["src", "tests"]
+files = ["src", "tests", "orchestration"]
 # tests/ is not a package (no __init__.py, so pytest keeps test module names
 # unqualified). mypy needs the directory on its search path to resolve the
 # `from conftest import ...` that pytest satisfies via rootdir injection.
@@ -122,6 +119,12 @@ ignore_missing_imports = true
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
+# `orchestration/` is a top-level directory rather than part of the installed
+# package, deliberately: the pipeline must stay runnable without Dagster, which
+# is only true while nothing in `src/` imports it. That means pytest cannot
+# import it via the installed distribution, so the repo root goes on the path --
+# the same way `dagster dev -m orchestration.definitions` resolves it.
+pythonpath = ["."]
 # --strict-markers turns a typo'd @pytest.mark into an error instead of a
 # silently-ignored no-op.
 addopts = "-q --strict-markers"
