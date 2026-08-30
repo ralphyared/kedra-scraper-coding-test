@@ -66,8 +66,24 @@ crawl:  ## Crawl a date range. Vars: START, END, BODY
 transform:  ## Transform landing into curated. Vars: START, END
 	uv run kedra transform --start $(START) --end $(END)
 
+# DAGSTER_HOME must be set, or Dagster uses a temporary directory and
+# discards materialisation history when the process exits -- which would make
+# the partition grid empty every time the UI is restarted.
 dagster:  ## Launch the Dagster UI
-	uv run dagster dev -m orchestration.definitions
+	@mkdir -p .dagster
+	DAGSTER_HOME=$(CURDIR)/.dagster uv run dagster dev -m orchestration.definitions
+
+# Materialises the whole grid one partition at a time. In normal use you would
+# press Backfill in the Dagster UI, which handles multi-dimensional partitions
+# natively; the CLI only takes one key at a time, so this loops. Each partition
+# is a separate process, which is the same isolation the asset relies on.
+backfill:  ## Materialise every partition in the configured window
+	@mkdir -p .dagster
+	@export DAGSTER_HOME=$(CURDIR)/.dagster; uv run python -c "from kedra_scraper.bodies import BODIES; from orchestration.partitions import month_partitions; print(*[f'{b.slug}|{m}' for b in BODIES for m in month_partitions.get_partition_keys()], sep=chr(10))" | while read key; do \
+	  echo "==> $$key"; \
+	  uv run dagster asset materialize --select landing_documents \
+	    --partition "$$key" -m orchestration.definitions || exit 1; \
+	done
 
 clean:  ## Remove caches and build artifacts
 	rm -rf .pytest_cache .mypy_cache .ruff_cache dist build

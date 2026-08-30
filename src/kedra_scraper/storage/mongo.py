@@ -19,6 +19,7 @@ from kedra_scraper.config import MongoSettings
 
 LANDING_COLLECTION = "decisions"
 CURATED_COLLECTION = "curated_decisions"
+PARTITION_RUNS_COLLECTION = "partition_runs"
 
 
 def utcnow() -> datetime:
@@ -29,6 +30,45 @@ def utcnow() -> datetime:
     surfaces much later as a confusing timezone bug.
     """
     return datetime.now(UTC)
+
+
+class PartitionRunRepository:
+    """One record per crawl of one body-month: what it found and what it stored.
+
+    This exists so the reconciliation outcome outlives the process that computed
+    it. The spider knows whether a partition reconciled, but that knowledge is
+    otherwise trapped in a log line and a subprocess exit code. Persisting it
+    means an asset check can assert on it later, and a reviewer can ask "which
+    partitions have ever failed to reconcile?" without grepping logs.
+    """
+
+    def __init__(self, database: Database[dict[str, Any]]) -> None:
+        self._db = database
+
+    @classmethod
+    def from_settings(cls, settings: MongoSettings) -> PartitionRunRepository:
+        client: MongoClient[dict[str, Any]] = MongoClient(settings.uri)
+        return cls(client[settings.db])
+
+    @property
+    def collection(self) -> Collection[dict[str, Any]]:
+        return self._db[PARTITION_RUNS_COLLECTION]
+
+    def record(self, stats: dict[str, Any]) -> None:
+        """Store the outcome of one partition crawl, keyed so re-runs overwrite.
+
+        Keyed on body plus partition rather than appended, because the question
+        being asked is "is this partition currently healthy?", not "how many
+        times has it been attempted?". A re-run that now reconciles should
+        replace a previous failure, not sit behind it in a history.
+        """
+        key = f"{stats['body']}:{stats['partition_date']}"
+        self.collection.update_one(
+            {"_id": key}, {"$set": {**stats, "recorded_at": utcnow()}}, upsert=True
+        )
+
+    def latest(self, body: str, partition_date: str) -> dict[str, Any] | None:
+        return self.collection.find_one({"_id": f"{body}:{partition_date}"})
 
 
 class DecisionRepository:

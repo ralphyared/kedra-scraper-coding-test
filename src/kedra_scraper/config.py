@@ -107,6 +107,12 @@ class Settings(BaseSettings):
     # per-request overhead does not dominate.
     partition_granularity: Literal["month", "week", "day"] = "month"
 
+    # Bounds of the Dagster partition grid. Monthly partitions are generated
+    # between these dates, so the size of the backfill a reviewer sees is
+    # configuration rather than a constant compiled into the asset definition.
+    partition_window_start: str = "2024-01-01"
+    partition_window_end: str = "2024-04-01"
+
     log_level: str = "INFO"
     log_dir: Path = Path("logs")
 
