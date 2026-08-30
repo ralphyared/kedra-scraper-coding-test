@@ -1,0 +1,109 @@
+# Local infrastructure for the pipeline: a NoSQL metadata store and an
+# S3-compatible object store, as the brief requires.
+#
+# Every value comes from `.env` (copy it from `.env.example`). Compose performs
+# ${VAR} substitution at parse time, so the same file configures both the
+# containers here and the application in src/kedra_scraper/config.py.
+name: kedra-scraper
+
+services:
+  # -------------------------------------------------------------------------
+  # Metadata store. The brief's transformation step says "fetch metadata from
+  # mongo", so the NoSQL choice is effectively specified.
+  # -------------------------------------------------------------------------
+  mongo:
+    image: mongo:7.0
+    restart: unless-stopped
+    environment:
+      MONGO_INITDB_ROOT_USERNAME: ${MONGO_USERNAME}
+      MONGO_INITDB_ROOT_PASSWORD: ${MONGO_PASSWORD}
+    ports:
+      - "${MONGO_PORT}:27017"
+    volumes:
+      # A named volume, not a bind mount into the repo. Database files in the
+      # working tree would be slow on Windows, would confuse git, and would be
+      # destroyed by a stray `git clean`.
+      - mongo-data:/data/db
+    healthcheck:
+      test: ["CMD", "mongosh", "--quiet", "--eval", "db.adminCommand('ping').ok"]
+      interval: 5s
+      timeout: 5s
+      retries: 12
+      start_period: 10s
+
+  # -------------------------------------------------------------------------
+  # Object store for the landing and curated zones. MinIO speaks the S3 API,
+  # so the same boto3 code runs unchanged against real S3.
+  # -------------------------------------------------------------------------
+  minio:
+    image: minio/minio:latest
+    restart: unless-stopped
+    command: server /data --console-address ":9001"
+    environment:
+      MINIO_ROOT_USER: ${MINIO_ROOT_USER}
+      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD}
+    ports:
+      - "${MINIO_API_PORT}:9000"      # S3 API
+      - "${MINIO_CONSOLE_PORT}:9001"  # web console
+    volumes:
+      - minio-data:/data
+    healthcheck:
+      test: ["CMD-SHELL", "curl -f http://localhost:9000/minio/health/live || exit 1"]
+      interval: 5s
+      timeout: 5s
+      retries: 12
+      start_period: 10s
+
+  # -------------------------------------------------------------------------
+  # One-shot bucket creation. Runs to completion and exits; it is not a
+  # long-lived service.
+  #
+  # `condition: service_healthy` is the important part -- without it this races
+  # MinIO's startup and fails intermittently, which is exactly the kind of flake
+  # that makes a reviewer's first `make up` fail.
+  # -------------------------------------------------------------------------
+  mc-init:
+    image: minio/mc:latest
+    # A profile keeps this out of a bare `docker compose up`. It is a job, not a
+    # service, and it is invoked explicitly with `run --rm` (see the Makefile) so
+    # that its exit code is actually checked instead of being swallowed by -d.
+    profiles: ["init"]
+    depends_on:
+      minio:
+        condition: service_healthy
+    environment:
+      MINIO_ROOT_USER: ${MINIO_ROOT_USER}
+      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD}
+      LANDING_BUCKET: ${LANDING_BUCKET}
+      CURATED_BUCKET: ${CURATED_BUCKET}
+    # $$ escapes the $ so Compose does NOT substitute it -- these are expanded
+    # by the shell inside the container, from the environment above.
+    # --ignore-existing makes this idempotent: re-running `make up` is a no-op
+    # rather than an error, which matches the pipeline's own re-run story.
+    entrypoint: >
+      /bin/sh -c "
+      mc alias set local http://minio:9000 $${MINIO_ROOT_USER} $${MINIO_ROOT_PASSWORD} &&
+      mc mb --ignore-existing local/$${LANDING_BUCKET} &&
+      mc mb --ignore-existing local/$${CURATED_BUCKET} &&
+      mc ls local
+      "
+
+  # -------------------------------------------------------------------------
+  # Inspection UI. Not used by the pipeline; it exists so a reviewer can look
+  # at the metadata without installing a Mongo client.
+  # -------------------------------------------------------------------------
+  mongo-express:
+    image: mongo-express:1.0.2
+    restart: unless-stopped
+    depends_on:
+      mongo:
+        condition: service_healthy
+    environment:
+      ME_CONFIG_MONGODB_URL: mongodb://${MONGO_USERNAME}:${MONGO_PASSWORD}@mongo:27017/?authSource=${MONGO_AUTH_SOURCE}
+      ME_CONFIG_BASICAUTH: "false"
+    ports:
+      - "${MONGO_EXPRESS_PORT}:8081"
+
+volumes:
+  mongo-data:
+  minio-data:
