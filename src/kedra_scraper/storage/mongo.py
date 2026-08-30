@@ -1,0 +1,100 @@
+"""MongoDB access for decision metadata.
+
+One document per decision, keyed by `<body_slug>:<identifier_slug>`. That key is
+deterministic, which is what makes the pipeline idempotent structurally rather
+than by convention: re-scraping upserts the same document, so duplicates are
+impossible even when a run is interrupted and repeated.
+"""
+
+from __future__ import annotations
+
+from datetime import UTC, datetime
+from typing import Any
+
+from pymongo import ASCENDING, DESCENDING, MongoClient
+from pymongo.collection import Collection
+from pymongo.database import Database
+
+from kedra_scraper.config import MongoSettings
+
+LANDING_COLLECTION = "decisions"
+CURATED_COLLECTION = "curated_decisions"
+
+
+def utcnow() -> datetime:
+    """Timezone-aware UTC now.
+
+    Explicitly aware, not `utcnow()`: naive datetimes round-trip through BSON as
+    UTC but compare incorrectly against aware ones in application code, which
+    surfaces much later as a confusing timezone bug.
+    """
+    return datetime.now(UTC)
+
+
+class DecisionRepository:
+    """Reads and writes for the landing-zone metadata collection."""
+
+    def __init__(self, database: Database[dict[str, Any]]) -> None:
+        self._db = database
+
+    @classmethod
+    def from_settings(cls, settings: MongoSettings) -> DecisionRepository:
+        client: MongoClient[dict[str, Any]] = MongoClient(settings.uri)
+        return cls(client[settings.db])
+
+    @property
+    def collection(self) -> Collection[dict[str, Any]]:
+        return self._db[LANDING_COLLECTION]
+
+    def ensure_indexes(self) -> None:
+        """Create the indexes the pipeline depends on. Safe to call repeatedly.
+
+        Called at crawl start rather than left to a migration step, because a
+        missing index here degrades silently: the dedup lookup still returns
+        correct answers, just with a collection scan per document, so the crawl
+        gets slower and slower as the corpus grows with nothing to show why.
+        """
+        self.collection.create_index([("body", ASCENDING), ("decision_date", DESCENDING)])
+        self.collection.create_index([("partition_date", ASCENDING)])
+        # Change detection looks documents up by this, and dedup across bodies
+        # scans it, so it earns an index despite not being unique.
+        self.collection.create_index([("content_hash", ASCENDING)])
+        self.collection.create_index([("status", ASCENDING)])
+
+    def get(self, document_id: str) -> dict[str, Any] | None:
+        """Fetch one record, or None. Used to decide whether anything changed."""
+        return self.collection.find_one({"_id": document_id})
+
+    def upsert(self, document: dict[str, Any]) -> bool:
+        """Insert or update one decision. Returns True if this was a new record.
+
+        `first_seen_at` is set only on insert via `$setOnInsert`, so it records
+        when the document entered the corpus and is not overwritten by later
+        runs. Everything else is refreshed on every pass.
+        """
+        document_id = document["_id"]
+        payload = {k: v for k, v in document.items() if k != "_id"}
+        result = self.collection.update_one(
+            {"_id": document_id},
+            {"$set": payload, "$setOnInsert": {"first_seen_at": utcnow()}},
+            upsert=True,
+        )
+        return result.upserted_id is not None
+
+    def touch(self, document_id: str) -> None:
+        """Record that an unchanged document was seen again.
+
+        A skipped document is still evidence the source still publishes it, and
+        that is worth keeping: `last_seen_at` is how a later run can distinguish
+        "unchanged" from "withdrawn from the site".
+        """
+        self.collection.update_one({"_id": document_id}, {"$set": {"last_seen_at": utcnow()}})
+
+    def count_for_partition(self, body: str, partition_date: str) -> int:
+        """How many records exist for one partition.
+
+        This is the scraped side of the found-vs-scraped reconciliation.
+        """
+        return self.collection.count_documents(
+            {"body": body, "partition_date": partition_date, "status": "ok"}
+        )
