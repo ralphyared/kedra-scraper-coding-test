@@ -12,7 +12,7 @@ from datetime import date
 
 from conftest import read_fixture
 from kedra_scraper.transform.cleaner import clean_html
-from kedra_scraper.transform.enrich import enrich
+from kedra_scraper.transform.enrich import _parse_prose_date, enrich
 from kedra_scraper.transform.run import _extension
 
 WRC = "case_wrc_inline.html"
@@ -121,17 +121,111 @@ def test_representative_names_are_not_padded() -> None:
     assert result.representatives == ("Derek Murphy, Derek Murphy Solicitors",)
 
 
-def test_an_unlabelled_field_returns_none_rather_than_a_guess() -> None:
+def test_the_labour_court_has_no_adjudicator_and_none_is_invented() -> None:
     """Regression: the first version returned "NOTE" as a Labour Court adjudicator.
 
     A generic `chairman` pattern matched unrelated bold text and the extractor
     took whatever followed. A confidently wrong name is far worse than an absent
     one -- it is indistinguishable from a correct one downstream.
+
+    `adjudicator` stays None here because the Labour Court does not appoint one;
+    it sits as a division of three, which is read separately.
     """
     cleaned = _clean(LABOUR_COURT)
     result = enrich(cleaned.html, cleaned.text)
     assert result.adjudicator is None
-    assert result.hearing_date is None
+
+
+# --------------------------------------------------------------------------
+# The Labour Court's layout, which differs from the WRC's in three ways
+# --------------------------------------------------------------------------
+
+
+def test_labour_court_parties_are_read_from_prose() -> None:
+    """ "SONOMA VALLEY (REPRESENTED BY ...) AND A WORKER" is a sentence, not a table.
+
+    The representation is stripped from the party name rather than left
+    attached, so the same employer appearing in another case compares equal.
+    """
+    cleaned = _clean(LABOUR_COURT)
+    result = enrich(cleaned.html, cleaned.text)
+    assert result.parties == ("SONOMA VALLEY", "A WORKER")
+    assert result.representatives == ("ANNE O'CONNELL, SOLICITOR",)
+
+
+def test_labour_court_division_is_captured_with_roles() -> None:
+    """Three people decide, and which role each held is part of the record."""
+    cleaned = _clean(LABOUR_COURT)
+    result = enrich(cleaned.html, cleaned.text)
+    assert result.division == (
+        "Chairman: Mr Foley",
+        "Employer Member: Ms Doyle",
+        "Worker Member: Mr Bell",
+    )
+
+
+def test_labour_court_hearing_date_is_read_from_narrative_prose() -> None:
+    """ "A Labour Court hearing took place on 5 January 2024."
+
+    Not a labelled field, and not the WRC's dd/mm/yyyy either. Both the location
+    and the format differ, so the WRC strategy finds nothing here.
+    """
+    cleaned = _clean(LABOUR_COURT)
+    assert enrich(cleaned.html, cleaned.text).hearing_date == date(2024, 1, 5)
+
+
+def test_labour_court_case_reference_is_captured() -> None:
+    cleaned = _clean(LABOUR_COURT)
+    assert enrich(cleaned.html, cleaned.text).internal_reference == "CD/23/179"
+
+
+def test_decided_by_unifies_two_different_institutions() -> None:
+    """A consumer asking "who decided this?" should not need to know the body.
+
+    The WRC appoints one adjudication officer; the Labour Court sits as a
+    division of three. Stored separately because they are genuinely different,
+    surfaced together because the question is the same.
+    """
+    wrc = _clean(WRC)
+    lc = _clean(LABOUR_COURT)
+    assert enrich(wrc.html, wrc.text).decided_by == ("Penelope McGrath",)
+    assert len(enrich(lc.html, lc.text).decided_by) == 3
+
+
+def test_the_wrc_layout_is_unaffected_by_the_labour_court_strategy() -> None:
+    """Guards against the second strategy overwriting the first.
+
+    The Labour Court rules run only where the WRC rules found nothing, so a
+    labelled value always wins over one inferred from prose.
+    """
+    cleaned = _clean(WRC)
+    result = enrich(cleaned.html, cleaned.text)
+    assert result.hearing_date == date(2024, 1, 16)
+    assert result.adjudicator == "Penelope McGrath"
+    assert result.parties == ("Car Valet", "Motor Garage")
+    assert result.division == ()
+
+
+def test_both_wrc_hearing_date_labels_are_recognised() -> None:
+    """Regression: the WRC uses two wordings, and one is not a superstring.
+
+    "date of hearing" does not occur inside "date of adjudication hearing" --
+    the words are interleaved -- so substring matching on only the shorter form
+    found the date on 115 of 766 records and left the other 554 looking as
+    though the site had never stated it. Synthetic markup here on purpose: this
+    tests the matcher, and the captured fixtures only cover one of the wordings.
+    """
+    short = "<article><p><b>Date of Hearing:</b></p><p>16/01/2024</p></article>"
+    long = "<article><p><b>Date of Adjudication Hearing:</b></p><p>16/01/2024</p></article>"
+    assert enrich(short, "").hearing_date == date(2024, 1, 16)
+    assert enrich(long, "").hearing_date == date(2024, 1, 16)
+
+
+def test_prose_dates_reject_impossible_and_unknown_values() -> None:
+    """A month name that is not a month, and a day that does not exist."""
+    assert _parse_prose_date("5 January 2024") == date(2024, 1, 5)
+    assert _parse_prose_date("31 February 2024") is None
+    assert _parse_prose_date("5 Smarch 2024") is None
 
 
 def test_a_body_that_labels_nothing_is_not_flagged_as_defective() -> None:
