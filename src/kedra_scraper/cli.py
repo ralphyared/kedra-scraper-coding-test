@@ -10,9 +10,14 @@ cannot take down a backfill.
 
 from __future__ import annotations
 
+import json
 import subprocess
 import sys
+import tempfile
+from collections import defaultdict
 from datetime import date
+from pathlib import Path
+from typing import Any
 
 import typer
 
@@ -61,27 +66,71 @@ def crawl(
     )
 
     failures = 0
-    for body_slug in bodies:
-        for partition in partitions:
-            command = [
-                sys.executable, "-m", "scrapy", "crawl", "wrc",
-                "-a", f"body={body_slug}",
-                "-a", f"start={partition.start.isoformat()}",
-                "-a", f"end={partition.end.isoformat()}",
-                "-a", f"partition={partition.label}",
-                "-a", f"run_id={run_id}",
-            ]  # fmt: skip
-            result = subprocess.run(command, check=False)
-            if result.returncode != 0:
-                failures += 1
-                log.error(
-                    "partition_subprocess_failed",
-                    body=body_slug,
-                    partition_date=partition.label,
-                    exit_code=result.returncode,
-                )
+    # Requirement 10 asks for a summary at the end of each run, not only per
+    # partition. Each subprocess writes its counters to a stats file and they
+    # are totalled here, so a twelve-partition run answers "how many records
+    # did this find, and how many did it store?" in one place rather than
+    # leaving a reader to add up twelve log lines.
+    totals: dict[str, int] = defaultdict(int)
+    per_partition: list[dict[str, Any]] = []
 
-    log.info("run_finished", run_id=run_id, failed_units=failures)
+    with tempfile.TemporaryDirectory() as tmp:
+        for body_slug in bodies:
+            for partition in partitions:
+                stats_path = Path(tmp) / f"{body_slug}-{partition.label}.json"
+                command = [
+                    sys.executable, "-m", "scrapy", "crawl", "wrc",
+                    "-a", f"body={body_slug}",
+                    "-a", f"start={partition.start.isoformat()}",
+                    "-a", f"end={partition.end.isoformat()}",
+                    "-a", f"partition={partition.label}",
+                    "-a", f"run_id={run_id}",
+                    "-a", f"stats_file={stats_path}",
+                ]  # fmt: skip
+                result = subprocess.run(command, check=False)
+
+                if result.returncode != 0:
+                    failures += 1
+                    log.error(
+                        "partition_subprocess_failed",
+                        body=body_slug,
+                        partition_date=partition.label,
+                        exit_code=result.returncode,
+                    )
+                    continue
+
+                if not stats_path.exists():
+                    # Exited cleanly but reported nothing. Counted as a failure
+                    # rather than ignored: a partition whose outcome is unknown
+                    # must not be silently absent from the totals.
+                    failures += 1
+                    log.error(
+                        "partition_stats_missing",
+                        body=body_slug,
+                        partition_date=partition.label,
+                    )
+                    continue
+
+                stats = json.loads(stats_path.read_text(encoding="utf-8"))
+                per_partition.append(stats)
+                for key in (
+                    "total_reported", "items_emitted", "skipped_unchanged",
+                    "duplicate_rows", "failures", "unique_documents",
+                    "files_skipped", "conditional_hits", "unaccounted",
+                ):  # fmt: skip
+                    totals[key] += int(stats.get(key, 0))
+
+    log.info(
+        "run_summary",
+        run_id=run_id,
+        bodies=bodies,
+        partitions_attempted=len(bodies) * len(partitions),
+        partitions_completed=len(per_partition),
+        partitions_failed=failures,
+        # Every partition reconciled individually, so the run did too.
+        all_reconciled=all(p.get("reconciled") for p in per_partition) and not failures,
+        **dict(totals),
+    )
     if failures:
         raise typer.Exit(code=1)
 

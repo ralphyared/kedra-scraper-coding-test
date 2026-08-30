@@ -38,6 +38,23 @@ from kedra_scraper.urls import absolute_url, page_count, search_url
 log = get_logger(__name__)
 
 
+def failure_status(failure: Any) -> int | None:
+    """The HTTP status behind a download failure, where there was one.
+
+    Requirement 10 asks for failed downloads to be logged with their URL *and*
+    error code. The exception's string representation usually contains the
+    status, but only as prose -- so it cannot be filtered, counted or alerted
+    on. Pulling it out as an integer is what makes "how many 404s did this run
+    see?" a query over the logs rather than a grep.
+
+    Returns None for failures that never reached a response at all: DNS
+    failures, connection timeouts, and requests refused by robots.txt.
+    """
+    response = getattr(failure.value, "response", None)
+    status = getattr(response, "status", None)
+    return int(status) if isinstance(status, int) else None
+
+
 def classify_failure(failure: Any) -> str:
     """Turn a download failure into the reason recorded against the document.
 
@@ -443,6 +460,7 @@ class WrcSpider(scrapy.Spider):
             identifier=item.identifier,
             url=absolute_url(attachment.url),
             reason=reason,
+            http_status=failure_status(failure),
         )
         yield from self._fetch_attachments(item, pending, existing)
 
@@ -457,6 +475,8 @@ class WrcSpider(scrapy.Spider):
             "case_fetch_failed",
             url=failure.request.url,
             error=str(failure.value),
+            http_status=failure_status(failure),
+            body=self.body.slug,
             partition_date=self.partition_label,
         )
 
