@@ -32,6 +32,50 @@ def utcnow() -> datetime:
     return datetime.now(UTC)
 
 
+class CuratedRepository:
+    """The curated collection: one document per transformed decision.
+
+    Separate from the landing collection rather than extra fields on it. The
+    landing record describes what the site served and must not change when the
+    cleaning rules do; the curated record is derived and is expected to be
+    rebuilt whenever those rules improve. Mixing them would make it impossible
+    to re-run the transformation without rewriting the record of what was
+    originally scraped.
+    """
+
+    def __init__(self, database: Database[dict[str, Any]]) -> None:
+        self._db = database
+
+    @classmethod
+    def from_settings(cls, settings: MongoSettings) -> CuratedRepository:
+        client: MongoClient[dict[str, Any]] = MongoClient(settings.uri)
+        return cls(client[settings.db])
+
+    @property
+    def collection(self) -> Collection[dict[str, Any]]:
+        return self._db[CURATED_COLLECTION]
+
+    def ensure_indexes(self) -> None:
+        self.collection.create_index([("body", ASCENDING), ("decision_date", DESCENDING)])
+        self.collection.create_index([("partition_date", ASCENDING)])
+        # Quality flags are the reason this collection is worth querying: "show
+        # me everything that came out stubbed or damaged" should not be a scan.
+        self.collection.create_index([("quality_flags", ASCENDING)])
+
+    def get(self, document_id: str) -> dict[str, Any] | None:
+        return self.collection.find_one({"_id": document_id})
+
+    def upsert(self, document: dict[str, Any]) -> bool:
+        document_id = document["_id"]
+        payload = {k: v for k, v in document.items() if k != "_id"}
+        result = self.collection.update_one(
+            {"_id": document_id},
+            {"$set": payload, "$setOnInsert": {"first_curated_at": utcnow()}},
+            upsert=True,
+        )
+        return result.upserted_id is not None
+
+
 class PartitionRunRepository:
     """One record per crawl of one body-month: what it found and what it stored.
 

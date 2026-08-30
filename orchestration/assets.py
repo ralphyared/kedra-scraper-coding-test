@@ -39,6 +39,7 @@ from dagster import (
 
 from kedra_scraper.config import get_settings
 from kedra_scraper.storage.mongo import DecisionRepository, PartitionRunRepository
+from kedra_scraper.transform.run import transform_range
 
 from .partitions import BODY_DIMENSION, MONTH_DIMENSION, decision_partitions
 
@@ -119,6 +120,58 @@ def landing_documents(context: AssetExecutionContext) -> MaterializeResult[None]
                 "https://www.workplacerelations.ie/en/search/?decisions=1"
                 f"&from={start.strftime('%d/%m/%Y')}&to={end.strftime('%d/%m/%Y')}"
             ),
+        }
+    )
+
+
+@asset(
+    partitions_def=decision_partitions,
+    deps=[landing_documents],
+    group_name="curated",
+    description="Cleaned, renamed and lightly enriched documents for one body-month.",
+)
+def curated_documents(context: AssetExecutionContext) -> MaterializeResult[None]:
+    """Derive the curated zone for one body-month from the landing zone.
+
+    `deps=[landing_documents]` rather than a value dependency: nothing is passed
+    between the two assets in memory. The landing asset's output is rows in
+    Mongo and objects in a bucket, and this reads them from there. Declaring the
+    edge still buys what matters -- Dagster will not curate a partition before
+    it has been crawled, and re-crawling a month marks its curated partition
+    stale in the UI.
+
+    Runs in-process, unlike the crawl. There is no Twisted reactor involved
+    here, so the subprocess isolation the landing asset needs would be pure
+    overhead.
+    """
+    keys = context.partition_key.keys_by_dimension
+    body = keys[BODY_DIMENSION]
+    start, end = month_bounds(keys[MONTH_DIMENSION])
+
+    stats = transform_range(start, end, body=body, run_id=context.run_id)
+    context.log.info(
+        "curated %s %s: %d transformed, %d unchanged, %d failed",
+        body,
+        partition_label(start),
+        stats.transformed,
+        stats.unchanged,
+        stats.failed,
+    )
+
+    if stats.failed:
+        # A failure here means a landing object could not be read or parsed.
+        # Unlike an incomplete crawl, there is nothing partial worth keeping --
+        # the curated zone is derived and can simply be rebuilt -- so this fails
+        # the materialisation rather than recording a degraded result.
+        raise RuntimeError(f"{stats.failed} document(s) failed to transform: {stats.errors[:3]}")
+
+    return MaterializeResult(
+        metadata={
+            "considered": stats.considered,
+            "transformed": stats.transformed,
+            "unchanged": stats.unchanged,
+            "flagged": stats.flagged,
+            "reconciled": stats.reconciled,
         }
     )
 

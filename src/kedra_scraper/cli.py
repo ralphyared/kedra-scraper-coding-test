@@ -23,6 +23,7 @@ from kedra_scraper.logging_setup import configure_logging, get_logger, new_run_i
 from kedra_scraper.partitions import Granularity, iter_partitions
 from kedra_scraper.storage.mongo import DecisionRepository
 from kedra_scraper.storage.objects import ObjectStore
+from kedra_scraper.transform.run import transform_range
 
 app = typer.Typer(add_completion=False, help="Scrape WRC decisions into a landing zone.")
 log = get_logger(__name__)
@@ -82,6 +83,41 @@ def crawl(
 
     log.info("run_finished", run_id=run_id, failed_units=failures)
     if failures:
+        raise typer.Exit(code=1)
+
+
+@app.command()
+def transform(
+    start: str = typer.Option(..., help="Inclusive start date, YYYY-MM-DD."),
+    end: str = typer.Option(..., help="Inclusive end date, YYYY-MM-DD."),
+    body: str = typer.Option("", help="Restrict to one body; default is all."),
+    force: bool = typer.Option(False, help="Re-derive even where the source has not changed."),
+) -> None:
+    """Derive the curated zone from the landing zone for a date range.
+
+    `--force` exists because the transformation is idempotent against its
+    *input*, not its code: an unchanged source is skipped even if the cleaning
+    rules have since improved. Rebuilding after a rules change is therefore an
+    explicit act rather than something that happens silently on the next run.
+    """
+    settings = get_settings()
+    run_id = new_run_id()
+    configure_logging(level=settings.log_level, log_dir=settings.log_dir, run_id=run_id)
+
+    stats = transform_range(
+        date.fromisoformat(start),
+        date.fromisoformat(end),
+        body=resolve(body).slug if body else None,
+        run_id=run_id,
+        force=force,
+    )
+    typer.echo(
+        f"considered={stats.considered} transformed={stats.transformed} "
+        f"unchanged={stats.unchanged} failed={stats.failed} flagged={stats.flagged}"
+    )
+    for error in stats.errors[:10]:
+        typer.echo(f"  {error}")
+    if not stats.reconciled or stats.failed:
         raise typer.Exit(code=1)
 
 
